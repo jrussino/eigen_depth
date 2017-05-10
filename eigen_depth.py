@@ -26,20 +26,20 @@ dateTimeStr = datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d-%H
 
 #TODO argparse with defaults
 BATCH_SIZE = 32
-NB_EPOCH = 1000 #1000
+NB_EPOCH = 40  #1000 #1000
 IMG_ROWS, IMG_COLS = 640, 480
-DATA_DIR = '/media/jrussino/DATA1/data/vd_depth/'
+#DATA_DIR = '/media/jrussino/DATA1/vizdoom/data/vd_depth/'
+DATA_DIR = '/home/jrussino/sandbox/eigen_depth/data/'
 LEARNING_RATE = 0.1 # used 0.1 for coarse
 MOMENTUM = 0.9
-OUTDIR = '/media/jrussino/DATA1/models/'
-#OUTDIR = '/home/jrussino/tb_drive/models/'
+OUTDIR = '/home/jrussino/sandbox/eigen_depth/models/'
 MODE = 'eval' # ["train_coarse", "train_fine", "eval"]]
 ## TRAINED COARSE
-MODEL_FILE = '/media/jrussino/DATA1/models/2016-09-06-230359/model_2016-09-06-130439.json'
-WEIGHTS_FILE = '/media/jrussino/DATA1/models/2016-09-06-230359/weights-final_2016-09-06-130439.h5'
+#MODEL_FILE = '/home/jrussino/sandbox/eigen_depth/models/2017-05-09-204542/depth_coarse_model_2017-05-09-204542.json'
+#WEIGHTS_FILE = '/home/jrussino/sandbox/eigen_depth/models/2017-05-09-204542/depth_coarse_weights_2017-05-09-204542.h5'
 ## TRAINED FINE
-#MODEL_FILE = 
-#WEIGHTS_FILE = 
+MODEL_FILE = '/home/jrussino/sandbox/eigen_depth/models/2017-05-09-205427/depth_fine_model_2017-05-09-205427.json'
+WEIGHTS_FILE = '/home/jrussino/sandbox/eigen_depth/models/2017-05-09-205427/depth_fine_weights_2017-05-09-205427.h5'
 LAMBDA = 0.5
 
 
@@ -47,7 +47,7 @@ def reshapeAndScale(data):
     if len(data.shape) == 3:
         data = data.reshape(data.shape[0], data.shape[2], data.shape[1])
     else:
-        data = data.reshape(data.shape[0], data.shape[3], data.shape[2], data.shape[1])
+        data = data.reshape(data.shape[0], data.shape[2], data.shape[1], data.shape[3])
     data = data.astype('float32')
     data /= 255
     return data
@@ -82,48 +82,49 @@ def toImage(data) :
 print(MODE)
 if MODE == 'train_coarse':
     # Input:
-    inputs = Input(shape=(3, IMG_ROWS/2, IMG_COLS/2))
+    #TODO check and enforce IMG_ROWS, IMG_COLS are even
+    inputs = Input(shape=(int(IMG_ROWS/2), int(IMG_COLS/2), 3))
 
     # Coarse 1:
     # 11x11 conv, 4 stride, ReLU activation, 2x2 pool
-    coarse_1 = Convolution2D(96, 11, 11, border_mode='same', init='uniform', subsample=(4,4), input_shape=(1,IMG_ROWS/2, IMG_COLS/2), name='coarse_1')(inputs)
+    coarse_1 = Convolution2D(96, (11, 11), strides=(4,4), padding='same', kernel_initializer='uniform', input_shape=(1,IMG_ROWS/2, IMG_COLS/2), name='coarse_1')(inputs)
     coarse_1 = Activation('relu')(coarse_1)
     coarse_1 = MaxPooling2D(pool_size=(2, 2))(coarse_1)
 
     # Coarse 2:
     # 5x5 conv, 1 stride, ReLU activation, 2x2 pool
-    coarse_2 = Convolution2D(256, 5, 5, border_mode='same', init='uniform', name='coarse_2')(coarse_1)
+    coarse_2 = Convolution2D(256, (5, 5), padding='same', kernel_initializer='uniform', name='coarse_2')(coarse_1)
     coarse_2 = Activation('relu')(coarse_2)
     coarse_2 = MaxPooling2D(pool_size=(2, 2))(coarse_2)
 
     # Coarse 3:
     # 3x3 conv, 1 stride, ReLU activation, no pool
-    coarse_3 = Convolution2D(384, 3, 3, border_mode='same', init='uniform', name='coarse_3')(coarse_2)
+    coarse_3 = Convolution2D(384, (3, 3), padding='same', kernel_initializer='uniform', name='coarse_3')(coarse_2)
     coarse_3 = Activation('relu')(coarse_3)
 
     # Coarse 4:
     # 3x3 conv, 1 stride, ReLU activation, no pool
-    coarse_4 = Convolution2D(384, 3, 3, border_mode='same', init='uniform', name='coarse_4')(coarse_3)
+    coarse_4 = Convolution2D(384, (3, 3), padding='same', kernel_initializer='uniform', name='coarse_4')(coarse_3)
     coarse_4 = Activation('relu')(coarse_4)
 
     # Coarse 5:
     # 3x3 conv, 1 stride, ReLU activation, 2x2 pool?
-    coarse_5 = Convolution2D(256, 3, 3, border_mode='same', init='uniform', name='coarse_5')(coarse_4)
+    coarse_5 = Convolution2D(256, (3, 3), padding='same', kernel_initializer='uniform', name='coarse_5')(coarse_4)
     coarse_5 = Activation('relu')(coarse_5)
     coarse_5 = MaxPooling2D(pool_size=(2, 2))(coarse_5)
 
     # Coarse 6:
     # Fully-connected, ReLU activation, followed by dropout
     coarse_6 = Flatten(name='coarse_6')(coarse_5)
-    coarse_6 = Dense(4096, init='uniform')(coarse_6)
+    coarse_6 = Dense(4096, kernel_initializer='uniform')(coarse_6)
     coarse_6 = Activation('relu')(coarse_6)
     coarse_6 = Dropout(0.5)(coarse_6)
 
     # Coarse 7:
     # Fully-connected, linear activation
-    coarse_7 = Dense((IMG_ROWS/8)*(IMG_COLS/8), init='uniform', name='coarse_7')(coarse_6)
+    coarse_7 = Dense((int(IMG_ROWS/8))*(int(IMG_COLS/8)), kernel_initializer='uniform', name='coarse_7')(coarse_6) #XXX
     coarse_7 = Activation('linear')(coarse_7)
-    coarse_7 = Reshape((IMG_ROWS/8, IMG_COLS/8))(coarse_7)
+    coarse_7 = Reshape((int(IMG_ROWS/8), int(IMG_COLS/8)))(coarse_7) #XXX
 
     # compile the model
     print('### COMPILING MODEL ###')
@@ -152,7 +153,7 @@ if MODE == 'train_coarse':
     history_cb = History()
     checkpointFile = os.path.join(OUTDIR, modelDir, 'coarse-weights-improvement-{epoch:02d}-{val_acc:.2f}.hdf5') 
     checkpoint_cb = ModelCheckpoint(filepath=checkpointFile, monitor='val_loss', verbose=1, save_best_only=True, save_weights_only=True, mode='auto')
-    model.fit(X_train, Y_train, nb_epoch=NB_EPOCH, batch_size=BATCH_SIZE,
+    model.fit(X_train, Y_train, epochs=NB_EPOCH, batch_size=BATCH_SIZE,
             verbose=1, validation_data=(X_test, Y_test), callbacks=[history_cb, checkpoint_cb])
     histFile = os.path.join(OUTDIR, modelDir, 'depth_coarse_hist_{}.h5'.format(dateTimeStr))
 
@@ -197,26 +198,26 @@ if MODE == 'train_fine':
 
     # Fine 1:
     # 9x9 conv, 2 stride, ReLU activation, 2x2 pool
-    fine_1 = Convolution2D(63, 9, 9, border_mode='same', init='uniform', subsample=(2,2), input_shape=(1, IMG_ROWS/2, IMG_COLS/2), name='fine_1_conv')(inputs)
+    fine_1 = Convolution2D(63, (9, 9), padding='same', kernel_initializer='uniform', strides=(2,2), input_shape=(1, int(IMG_ROWS/2), int(IMG_COLS/2)), name='fine_1_conv')(inputs) #XXX
     fine_1 = Activation('relu', name='fine_1_relu')(fine_1)
     fine_1 = MaxPooling2D(pool_size=(2, 2), name='fine_1_pool')(fine_1)
 
     # Fine 2:
     # Concatenation with Coarse 7
     coarse_out = model.outputs[0]
-    coarse_out = Reshape((1, IMG_ROWS/8, IMG_COLS/8), name='coarse_out_reshape')(coarse_out)
-    fine_2 = merge([fine_1, coarse_out], mode='concat', concat_axis=1, name='fine_2_merge')
+    coarse_out = Reshape((int(IMG_ROWS/8), int(IMG_COLS/8), 1), name='coarse_out_reshape')(coarse_out) #XXX
+    fine_2 = merge([fine_1, coarse_out], mode='concat', concat_axis=3, name='fine_2_merge')
 
     # Fine 3:
     # 5x5 conv, 1 stride, ReLU activation, no pool
-    fine_3 = Convolution2D(64, 5, 5, border_mode='same', init='uniform', subsample=(1,1), name='fine_3_conv')(fine_2)
+    fine_3 = Convolution2D(64, (5, 5), padding='same', kernel_initializer='uniform', strides=(1,1), name='fine_3_conv')(fine_2)
     fine_3 = Activation('relu', name='fine_3_relu')(fine_3)
 
     # Fine 4:
     # 5x5 conv, 1 stride, linear activation, no pool
-    fine_4 = Convolution2D(1, 5, 5, border_mode='same', init='uniform', subsample=(1,1), name='fine_4_conv')(fine_3)
+    fine_4 = Convolution2D(1, (5, 5), padding='same', kernel_initializer='uniform', strides=(1,1), name='fine_4_conv')(fine_3)
     fine_4 = Activation('linear', name='fine_4_linear')(fine_4)
-    fine_4 = Reshape((IMG_ROWS/8, IMG_COLS/8), name='fine_4_reshape')(fine_4)
+    fine_4 = Reshape((int(IMG_ROWS/8), int(IMG_COLS/8)), name='fine_4_reshape')(fine_4) #XXX
 
     # compile the model
     print('### COMPILING MODEL ###')
@@ -245,7 +246,7 @@ if MODE == 'train_fine':
     history_cb = History()
     checkpointFile = os.path.join(OUTDIR, modelDir, 'fine-weights-improvement-{epoch:02d}-{val_acc:.2f}.hdf5') 
     checkpoint_cb = ModelCheckpoint(filepath=checkpointFile, monitor='val_loss', verbose=1, save_best_only=True, save_weights_only=True, mode='auto')
-    model.fit(X_train, Y_train, nb_epoch=NB_EPOCH, batch_size=BATCH_SIZE,
+    model.fit(X_train, Y_train, epochs=NB_EPOCH, batch_size=BATCH_SIZE,
             verbose=1, validation_data=(X_test, Y_test), callbacks=[history_cb, checkpoint_cb])
     histFile = os.path.join(OUTDIR, modelDir, 'depth_fine_hist_{}.json'.format(dateTimeStr))
 
@@ -296,23 +297,23 @@ if MODE == 'eval':
     print('Test accuracy:', score[1])
         
     # show test samples
-    for _ in range(100):
-        random_index = np.random.randint(X_test.shape[0])
-        print('random index: {}'.format(random_index))
-        x = X_test[random_index]
-        y = Y_test[random_index]
-        print('x: {}'.format(x.shape))
-        print('y: {}'.format(y.shape))
-
-        p = model.predict(np.array([x]), batch_size=1)
-        print('p: {}'.format(p.shape))
-
-        x_img = toImage(x)
-        y_img = toImage(y)
-        p_img = toImage(p)
-
-        cv2.imshow('input', x_img)
-        cv2.imshow('prediction', p_img)
-        cv2.imshow('ground truth', y_img)
-        cv2.waitKey(0)
+#    for _ in range(100):
+#        random_index = np.random.randint(X_test.shape[0])
+#        print('random index: {}'.format(random_index))
+#        x = X_test[random_index]
+#        y = Y_test[random_index]
+#        print('x: {}'.format(x.shape))
+#        print('y: {}'.format(y.shape))
+#
+#        p = model.predict(np.array([x]), batch_size=1)
+#        print('p: {}'.format(p.shape))
+#
+#        x_img = toImage(x)
+#        y_img = toImage(y)
+#        p_img = toImage(p)
+#
+#        cv2.imshow('input', x_img)
+#        cv2.imshow('prediction', p_img)
+#        cv2.imshow('ground truth', y_img)
+#        cv2.waitKey(0)
 
