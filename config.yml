@@ -1,0 +1,11 @@
+#TODO maybe two sets of weights - one per network
+BATCH_SIZE: 32 
+EPOCHS: 40  #1000
+IMG_ROWS: 640 #TODO auto-detect
+IMG_COLS: 480
+LEARNING_RATE: 0.1
+MOMENTUM: 0.9
+LAMBDA: 0.5
+DATA_DIR: "/home/jrussino/sandbox/eigen_depth/data/"
+OUTDIR: "/home/jrussino/sandbox/eigen_depth/models/"
+MODE: "train_fine"

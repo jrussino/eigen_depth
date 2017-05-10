@@ -9,6 +9,7 @@ import datetime
 import numpy as np
 import os
 import time
+import yaml
 
 from keras.models import Model, model_from_json
 from keras.layers import Dense, Dropout, Activation, Flatten, Input, Reshape, merge
@@ -23,23 +24,12 @@ np.random.seed(None)
 dateTimeStr = datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d-%H%M%S')
 
 
-#TODO argparse with defaults
-BATCH_SIZE = 32
-NB_EPOCH = 40  #1000 #1000
-IMG_ROWS, IMG_COLS = 640, 480
-#DATA_DIR = '/media/jrussino/DATA1/vizdoom/data/vd_depth/'
-DATA_DIR = '/home/jrussino/sandbox/eigen_depth/data/'
-LEARNING_RATE = 0.1 # used 0.1 for coarse
-MOMENTUM = 0.9
-OUTDIR = '/home/jrussino/sandbox/eigen_depth/models/'
-MODE = 'eval' # ["train_coarse", "train_fine", "eval"]]
 ## TRAINED COARSE
-#MODEL_FILE = '/home/jrussino/sandbox/eigen_depth/models/2017-05-09-204542/depth_coarse_model_2017-05-09-204542.json'
-#WEIGHTS_FILE = '/home/jrussino/sandbox/eigen_depth/models/2017-05-09-204542/depth_coarse_weights_2017-05-09-204542.h5'
+MODEL_FILE = '/home/jrussino/sandbox/eigen_depth/models/2017-05-09-230038/depth_coarse_model_2017-05-09-230038.json'
+WEIGHTS_FILE = '/home/jrussino/sandbox/eigen_depth/models/2017-05-09-230038/depth_coarse_weights_2017-05-09-230038.h5'
 ## TRAINED FINE
-MODEL_FILE = '/home/jrussino/sandbox/eigen_depth/models/2017-05-09-205427/depth_fine_model_2017-05-09-205427.json'
-WEIGHTS_FILE = '/home/jrussino/sandbox/eigen_depth/models/2017-05-09-205427/depth_fine_weights_2017-05-09-205427.h5'
-LAMBDA = 0.5
+#MODEL_FILE = '/home/jrussino/sandbox/eigen_depth/models/2017-05-09-205427/depth_fine_model_2017-05-09-205427.json'
+#WEIGHTS_FILE = '/home/jrussino/sandbox/eigen_depth/models/2017-05-09-205427/depth_fine_weights_2017-05-09-205427.h5'
 
 
 """ UTILS """
@@ -62,26 +52,28 @@ def loadData(dataDir):
     Y = reshapeAndScale(Y)
     return X, Y
 
-def scale_invariant_error(y_true, y_pred):
-    first_log = K.log(K.clip(y_pred, K.epsilon(), np.inf) + 1.)
-    second_log = K.log(K.clip(y_true, K.epsilon(), np.inf) + 1.)
-    return K.mean(K.square(first_log - second_log), axis=-1) - LAMBDA * K.square(K.mean(first_log - second_log, axis=-1))
 
 
 """ DEPTHPREDICTOR """
 class DepthPredictor(object):
-    def __init__(self, configFile=None):
-        #self.config = yaml.load(configFile)
-        pass
+    def __init__(self, configFile):
+        with open(configFile) as cfg:
+            self.config = yaml.load(cfg)
+        self.MODE = self.config['MODE']
+
+    def scale_invariant_error(self, y_true, y_pred):
+        first_log = K.log(K.clip(y_pred, K.epsilon(), np.inf) + 1.)
+        second_log = K.log(K.clip(y_true, K.epsilon(), np.inf) + 1.)
+        return K.mean(K.square(first_log - second_log), axis=-1) - self.config['LAMBDA'] * K.square(K.mean(first_log - second_log, axis=-1))
 
     def train_coarse(self):
         # Input:
-        #TODO check and enforce IMG_ROWS, IMG_COLS are even
-        inputs = Input(shape=(int(IMG_ROWS/2), int(IMG_COLS/2), 3))
+        #TODO check and enforce self.config['IMG_ROWS'], self.config['IMG_COLS'] are even
+        inputs = Input(shape=(int(self.config['IMG_ROWS']/2), int(self.config['IMG_COLS']/2), 3))
 
         # Coarse 1:
         # 11x11 conv, 4 stride, ReLU activation, 2x2 pool
-        coarse_1 = Convolution2D(96, (11, 11), strides=(4,4), padding='same', kernel_initializer='uniform', input_shape=(1,IMG_ROWS/2, IMG_COLS/2), name='coarse_1')(inputs)
+        coarse_1 = Convolution2D(96, (11, 11), strides=(4,4), padding='same', kernel_initializer='uniform', input_shape=(1,self.config['IMG_ROWS']/2, self.config['IMG_COLS']/2), name='coarse_1')(inputs)
         coarse_1 = Activation('relu')(coarse_1)
         coarse_1 = MaxPooling2D(pool_size=(2, 2))(coarse_1)
 
@@ -116,46 +108,47 @@ class DepthPredictor(object):
 
         # Coarse 7:
         # Fully-connected, linear activation
-        coarse_7 = Dense((int(IMG_ROWS/8))*(int(IMG_COLS/8)), kernel_initializer='uniform', name='coarse_7')(coarse_6) #XXX
+        coarse_7 = Dense((int(self.config['IMG_ROWS']/8))*(int(self.config['IMG_COLS']/8)), kernel_initializer='uniform', name='coarse_7')(coarse_6) #XXX
         coarse_7 = Activation('linear')(coarse_7)
-        coarse_7 = Reshape((int(IMG_ROWS/8), int(IMG_COLS/8)))(coarse_7) #XXX
+        coarse_7 = Reshape((int(self.config['IMG_ROWS']/8), int(self.config['IMG_COLS']/8)))(coarse_7) #XXX
 
         # compile the model
         #TODO compile model once and save (separate script)
         print('### COMPILING MODEL ###')
         model = Model(input=inputs, output=coarse_7)
-        model.compile(loss=scale_invariant_error, optimizer=SGD(lr=LEARNING_RATE, momentum=MOMENTUM), metrics=['accuracy'])
+        model.compile(loss=self.scale_invariant_error, optimizer=SGD(lr=self.config['LEARNING_RATE'], momentum=self.config['MOMENTUM']), metrics=['accuracy'])
         model.summary()
 
         # save the model architecture to file
         print('### SAVING MODEL ARCHITECTURE ###')
         modelDir = dateTimeStr;
-        os.mkdir(os.path.join(OUTDIR, modelDir))
-        modelFile = os.path.join(OUTDIR, modelDir, 'depth_coarse_model_{}.json'.format(dateTimeStr))
+        os.mkdir(os.path.join(self.config['OUTDIR'], modelDir))
+        modelFile = os.path.join(self.config['OUTDIR'], modelDir, 'depth_coarse_model_{}.json'.format(dateTimeStr))
         print(model.to_json(), file=open(modelFile, 'w'))
 
         # load and preprocess the data
         print('### LOADING DATA ###')
-        X_train, Y_train = loadData(os.path.join(DATA_DIR, 'train/'))
-        X_test , Y_test = loadData(os.path.join(DATA_DIR, 'test/'))
+        X_train, Y_train = loadData(os.path.join(self.config['DATA_DIR'], 'train/'))
+        X_test , Y_test = loadData(os.path.join(self.config['DATA_DIR'], 'test/'))
         print('X_train shape:', X_train.shape)
         print('Y_train shape:', Y_train.shape)
         print(X_train.shape[0], 'train samples')
         print(X_test.shape[0], 'test samples')
 
         # train the model
+        #TODO use validation_split instead of using separate (test) data
         print('### TRAINING ###')
         history_cb = History()
-        checkpointFile = os.path.join(OUTDIR, modelDir, 'coarse-weights-improvement-{epoch:02d}-{val_acc:.2f}.hdf5') 
+        checkpointFile = os.path.join(self.config['OUTDIR'], modelDir, 'coarse-weights-improvement-{epoch:02d}-{val_acc:.2f}.hdf5') 
         checkpoint_cb = ModelCheckpoint(filepath=checkpointFile, monitor='val_loss', verbose=1, save_best_only=True, save_weights_only=True, mode='auto')
-        model.fit(X_train, Y_train, epochs=NB_EPOCH, batch_size=BATCH_SIZE,
+        model.fit(X_train, Y_train, epochs=self.config['EPOCHS'], batch_size=self.config['BATCH_SIZE'],
                 verbose=1, validation_data=(X_test, Y_test), callbacks=[history_cb, checkpoint_cb])
-        histFile = os.path.join(OUTDIR, modelDir, 'depth_coarse_hist_{}.h5'.format(dateTimeStr))
+        histFile = os.path.join(self.config['OUTDIR'], modelDir, 'depth_coarse_hist_{}.h5'.format(dateTimeStr))
 
         # save the model weights to file
         print('### SAVING TRAINED MODEL ###')
         print(history_cb.history, file=open(histFile, 'w'))
-        weightsFile = os.path.join(OUTDIR, modelDir, 'depth_coarse_weights_{}.h5'.format(dateTimeStr))
+        weightsFile = os.path.join(self.config['OUTDIR'], modelDir, 'depth_coarse_weights_{}.h5'.format(dateTimeStr))
         model.save_weights(weightsFile)
 
         # evaluate the trained model
@@ -165,7 +158,7 @@ class DepthPredictor(object):
         model_json = open(modelFile, 'r').read()
         model2 = model_from_json(model_json)
         model2.load_weights(weightsFile)
-        model2.compile(loss=scale_invariant_error, optimizer=SGD(lr=LEARNING_RATE, momentum=MOMENTUM), metrics=['accuracy'])
+        model2.compile(loss=self.scale_invariant_error, optimizer=SGD(lr=self.config['LEARNING_RATE'], momentum=self.config['MOMENTUM']), metrics=['accuracy'])
 
         # evaluate the model
         print('### EVALUATING ###')
@@ -191,14 +184,14 @@ class DepthPredictor(object):
 
         # Fine 1:
         # 9x9 conv, 2 stride, ReLU activation, 2x2 pool
-        fine_1 = Convolution2D(63, (9, 9), padding='same', kernel_initializer='uniform', strides=(2,2), input_shape=(1, int(IMG_ROWS/2), int(IMG_COLS/2)), name='fine_1_conv')(inputs) #XXX
+        fine_1 = Convolution2D(63, (9, 9), padding='same', kernel_initializer='uniform', strides=(2,2), input_shape=(1, int(self.config['IMG_ROWS']/2), int(self.config['IMG_COLS']/2)), name='fine_1_conv')(inputs) #XXX
         fine_1 = Activation('relu', name='fine_1_relu')(fine_1)
         fine_1 = MaxPooling2D(pool_size=(2, 2), name='fine_1_pool')(fine_1)
 
         # Fine 2:
         # Concatenation with Coarse 7
         coarse_out = model.outputs[0]
-        coarse_out = Reshape((int(IMG_ROWS/8), int(IMG_COLS/8), 1), name='coarse_out_reshape')(coarse_out) #XXX
+        coarse_out = Reshape((int(self.config['IMG_ROWS']/8), int(self.config['IMG_COLS']/8), 1), name='coarse_out_reshape')(coarse_out) #XXX
         fine_2 = merge([fine_1, coarse_out], mode='concat', concat_axis=3, name='fine_2_merge')
 
         # Fine 3:
@@ -210,43 +203,44 @@ class DepthPredictor(object):
         # 5x5 conv, 1 stride, linear activation, no pool
         fine_4 = Convolution2D(1, (5, 5), padding='same', kernel_initializer='uniform', strides=(1,1), name='fine_4_conv')(fine_3)
         fine_4 = Activation('linear', name='fine_4_linear')(fine_4)
-        fine_4 = Reshape((int(IMG_ROWS/8), int(IMG_COLS/8)), name='fine_4_reshape')(fine_4) #XXX
+        fine_4 = Reshape((int(self.config['IMG_ROWS']/8), int(self.config['IMG_COLS']/8)), name='fine_4_reshape')(fine_4) #XXX
 
         # compile the model
         print('### COMPILING MODEL ###')
         model = Model(input=inputs, output=fine_4)
-        model.compile(loss=scale_invariant_error, optimizer=SGD(lr=LEARNING_RATE, momentum=MOMENTUM), metrics=['accuracy'])
+        model.compile(loss=self.scale_invariant_error, optimizer=SGD(lr=self.config['LEARNING_RATE'], momentum=self.config['MOMENTUM']), metrics=['accuracy'])
         model.summary()
 
         # save the model architecture to file
         print('### SAVING MODEL ARCHITECTURE ###')
         modelDir = dateTimeStr;
-        os.mkdir(os.path.join(OUTDIR, modelDir))
-        modelFile = os.path.join(OUTDIR, modelDir, 'depth_fine_model_{}.json'.format(dateTimeStr))
+        os.mkdir(os.path.join(self.config['OUTDIR'], modelDir))
+        modelFile = os.path.join(self.config['OUTDIR'], modelDir, 'depth_fine_model_{}.json'.format(dateTimeStr))
         print(model.to_json(), file=open(modelFile, 'w'))
 
         # load and preprocess the data
         print('### LOADING DATA ###')
-        X_train, Y_train = loadData(os.path.join(DATA_DIR, 'train/'))
-        X_test , Y_test = loadData(os.path.join(DATA_DIR, 'test/'))
+        X_train, Y_train = loadData(os.path.join(self.config['DATA_DIR'], 'train/'))
+        X_test , Y_test = loadData(os.path.join(self.config['DATA_DIR'], 'test/'))
         print('X_train shape:', X_train.shape)
         print('Y_train shape:', Y_train.shape)
         print(X_train.shape[0], 'train samples')
         print(X_test.shape[0], 'test samples')
 
         # train the model
+        #TODO use validation_split instead of using separate (test) data
         print('### TRAINING ###')
         history_cb = History()
-        checkpointFile = os.path.join(OUTDIR, modelDir, 'fine-weights-improvement-{epoch:02d}-{val_acc:.2f}.hdf5') 
+        checkpointFile = os.path.join(self.config['OUTDIR'], modelDir, 'fine-weights-improvement-{epoch:02d}-{val_acc:.2f}.hdf5') 
         checkpoint_cb = ModelCheckpoint(filepath=checkpointFile, monitor='val_loss', verbose=1, save_best_only=True, save_weights_only=True, mode='auto')
-        model.fit(X_train, Y_train, epochs=NB_EPOCH, batch_size=BATCH_SIZE,
+        model.fit(X_train, Y_train, epochs=self.config['EPOCHS'], batch_size=self.config['BATCH_SIZE'],
                 verbose=1, validation_data=(X_test, Y_test), callbacks=[history_cb, checkpoint_cb])
-        histFile = os.path.join(OUTDIR, modelDir, 'depth_fine_hist_{}.json'.format(dateTimeStr))
+        histFile = os.path.join(self.config['OUTDIR'], modelDir, 'depth_fine_hist_{}.json'.format(dateTimeStr))
 
         # save the model weights to file
         print('### SAVING TRAINED MODEL ###')
         print(history_cb.history, file=open(histFile, 'w'))
-        weightsFile = os.path.join(OUTDIR, modelDir, 'depth_fine_weights_{}.h5'.format(dateTimeStr))
+        weightsFile = os.path.join(self.config['OUTDIR'], modelDir, 'depth_fine_weights_{}.h5'.format(dateTimeStr))
         model.save_weights(weightsFile)
 
         # evaluate the trained model
@@ -256,7 +250,7 @@ class DepthPredictor(object):
         model_json = open(modelFile, 'r').read()
         model2 = model_from_json(model_json)
         model2.load_weights(weightsFile)
-        model2.compile(loss=scale_invariant_error, optimizer=SGD(lr=LEARNING_RATE, momentum=MOMENTUM), metrics=['accuracy'])
+        model2.compile(loss=self.scale_invariant_error, optimizer=SGD(lr=self.config['LEARNING_RATE'], momentum=self.config['MOMENTUM']), metrics=['accuracy'])
 
         # evaluate the model
         print('### EVALUATING ###')
@@ -273,13 +267,13 @@ class DepthPredictor(object):
         model_json = open(MODEL_FILE, 'r').read()
         model = model_from_json(model_json)
         model.load_weights(WEIGHTS_FILE)
-        model.compile(loss=scale_invariant_error, optimizer=SGD(lr=LEARNING_RATE, momentum=MOMENTUM), metrics=['accuracy'])
+        model.compile(loss=self.scale_invariant_error, optimizer=SGD(lr=self.config['LEARNING_RATE'], momentum=self.config['MOMENTUM']), metrics=['accuracy'])
         model.summary()
 
         # load and preprocess the data
         print('### LOADING DATA ###')
-        X_train, Y_train = loadData(os.path.join(DATA_DIR, 'train/'))
-        X_test , Y_test = loadData(os.path.join(DATA_DIR, 'test/'))
+        X_train, Y_train = loadData(os.path.join(self.config['DATA_DIR'], 'train/'))
+        X_test , Y_test = loadData(os.path.join(self.config['DATA_DIR'], 'test/'))
         print('X_train shape:', X_train.shape)
         print('Y_train shape:', Y_train.shape)
         print(X_train.shape[0], 'train samples')
@@ -292,14 +286,13 @@ class DepthPredictor(object):
         print('Test accuracy:', score[1])
 
 
-depthPredictor = DepthPredictor()
-
-print(MODE)
-if MODE == 'train_coarse':
+depthPredictor = DepthPredictor('./config.yml')
+print(depthPredictor.MODE)
+if depthPredictor.MODE == 'train_coarse':
     depthPredictor.train_coarse()
 
-if MODE == 'train_fine':
+if depthPredictor.MODE == 'train_fine':
     depthPredictor.train_fine()
 
-if MODE == 'eval':
+if depthPredictor.MODE == 'eval':
     depthPredictor.eval()
