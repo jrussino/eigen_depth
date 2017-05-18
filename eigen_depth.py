@@ -142,7 +142,7 @@ class DepthPredictor(object):
         checkpointFile = os.path.join(self.config['OUTDIR'], modelDir, 'coarse-weights-improvement-{epoch:02d}-{val_acc:.2f}.hdf5') 
         checkpoint_cb = ModelCheckpoint(filepath=checkpointFile, monitor='val_loss', verbose=1, save_best_only=True, save_weights_only=True, mode='auto')
         model.fit(X_train, Y_train, epochs=self.config['EPOCHS'], batch_size=self.config['BATCH_SIZE'],
-                verbose=1, validation_data=(X_test, Y_test), callbacks=[history_cb, checkpoint_cb])
+                verbose=1, validation_split=0.2, callbacks=[history_cb, checkpoint_cb])
         histFile = os.path.join(self.config['OUTDIR'], modelDir, 'depth_coarse_hist_{}.h5'.format(dateTimeStr))
 
         # save the model weights to file
@@ -234,7 +234,7 @@ class DepthPredictor(object):
         checkpointFile = os.path.join(self.config['OUTDIR'], modelDir, 'fine-weights-improvement-{epoch:02d}-{val_acc:.2f}.hdf5') 
         checkpoint_cb = ModelCheckpoint(filepath=checkpointFile, monitor='val_loss', verbose=1, save_best_only=True, save_weights_only=True, mode='auto')
         model.fit(X_train, Y_train, epochs=self.config['EPOCHS'], batch_size=self.config['BATCH_SIZE'],
-                verbose=1, validation_data=(X_test, Y_test), callbacks=[history_cb, checkpoint_cb])
+                verbose=1, validation_split=0.2, callbacks=[history_cb, checkpoint_cb])
         histFile = os.path.join(self.config['OUTDIR'], modelDir, 'depth_fine_hist_{}.json'.format(dateTimeStr))
 
         # save the model weights to file
